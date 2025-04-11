@@ -1,10 +1,12 @@
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+require('dotenv').config();
 const axios = require('axios');
 const express = require("express");
 const bodyParser = require("body-parser");
 
 const app = express();
 const PORT = 3000;
+
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
 app.use(bodyParser.json());
 
