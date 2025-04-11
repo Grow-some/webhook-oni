@@ -1,11 +1,10 @@
 #!/bin/bash
-
 echo "Webhook server starting..."
-python /podman/Discord_webhook/webhook_server.py &
+python3 webhook_server.py &
 
-# ファイルの変更を監視し再起動
-while inotifywait -e modify /podman/Discord_webhook/webhook_server.py; do
-  echo "Webhook script updated, restarting..."
-  pkill -f webhook_server.py
-  python /podman/Discord_webhook/webhook_server.py &
+inotifywait -m -e modify webhook_server.py |
+while read path action file; do
+    echo "File ${file} changed, restarting server..."
+    pkill -f webhook_server.py
+    python3 webhook_server.py &
 done
