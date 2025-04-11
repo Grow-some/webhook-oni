@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   webhook:
-    build: Dockerfile
+    build:
+      context: .
+      dockerfile: Dockerfile
     volumes:
       - ./:/app:ro
     container_name: DiscordWebhook
