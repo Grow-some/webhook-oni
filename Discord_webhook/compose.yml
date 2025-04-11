@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ./:/app:ro
+      - ./:/app
     container_name: DiscordWebhook
     ports:
       - "5000:5000"
