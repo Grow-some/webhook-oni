@@ -57,5 +57,9 @@ async def on_voice_state_update(user, before, after):
             message = f"{after.channel.name}に{user.display_name}が参加しました"
             logger.info(message)
             send_line_message(message)
+        if before.channel is not None and before.channel.id == VOICE_CHANNEL_ID:
+            message = f"{before.channel.name}から{user.display_name}が退出しました"
+            logger.info(message)
+            send_line_message(message)
 
 client.run(DISCORD_TOKEN)
