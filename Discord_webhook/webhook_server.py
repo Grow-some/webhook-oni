@@ -133,17 +133,18 @@ async def send_discord_message(channel_id, message):
         return False
 
 async def send_monthly_report(report):
-    """Send monthly report to both LINE and Discord"""
-    send_line_message(report)
-    
+    """Send monthly report to Discord channel only"""
     if MONTHLY_REPORT_CHANNEL:
         success = await send_discord_message(MONTHLY_REPORT_CHANNEL, report)
         if success:
             logger.info("Monthly report sent to Discord channel")
+            return True
         else:
             logger.error("Failed to send monthly report to Discord channel")
+            return False
     else:
         logger.warning("MONTHLY_REPORT_CHANNEL not configured, skipping Discord report")
+        return False
 
 def check_and_send_monthly_report():
     """Check if it's time to send a monthly report and send if needed"""
@@ -231,8 +232,11 @@ async def on_message(message):
     if message.content.lower() == "!report" and message.author.guild_permissions.administrator:
         report = generate_monthly_report()
         
-        await send_monthly_report(report)
+        success = await send_monthly_report(report)
         
-        await message.channel.send("Monthly report sent to LINE group and Discord channel.")
+        if success:
+            await message.channel.send("Monthly report sent to Discord channel.")
+        else:
+            await message.channel.send("Failed to send monthly report. Please check MONTHLY_REPORT_CHANNEL configuration.")
 
 client.run(DISCORD_TOKEN)
