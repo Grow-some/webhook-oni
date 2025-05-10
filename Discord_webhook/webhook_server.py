@@ -13,6 +13,7 @@ import threading
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID") or 0)
+MONTHLY_REPORT_CHANNEL = int(os.getenv("MONTHLY_REPORT_CHANNEL") or 0)
 
 LINE_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
 LINE_GROUP_ID = os.getenv("LINE_GROUP_ID")
@@ -116,6 +117,34 @@ def generate_monthly_report():
     
     return report
 
+async def send_discord_message(channel_id, message):
+    """Send a message to a Discord channel"""
+    try:
+        channel = client.get_channel(channel_id)
+        if channel:
+            await channel.send(message)
+            logger.info(f"✅ Discordメッセージ送信成功: Channel {channel_id}")
+            return True
+        else:
+            logger.error(f"❌ Discordチャンネルが見つかりません: {channel_id}")
+            return False
+    except Exception as e:
+        logger.error(f"❌ Discordメッセージ送信失敗: {e}")
+        return False
+
+async def send_monthly_report(report):
+    """Send monthly report to both LINE and Discord"""
+    send_line_message(report)
+    
+    if MONTHLY_REPORT_CHANNEL:
+        success = await send_discord_message(MONTHLY_REPORT_CHANNEL, report)
+        if success:
+            logger.info("Monthly report sent to Discord channel")
+        else:
+            logger.error("Failed to send monthly report to Discord channel")
+    else:
+        logger.warning("MONTHLY_REPORT_CHANNEL not configured, skipping Discord report")
+
 def check_and_send_monthly_report():
     """Check if it's time to send a monthly report and send if needed"""
     now = datetime.datetime.now()
@@ -126,7 +155,8 @@ def check_and_send_monthly_report():
         
         if last_report is None or last_report != now.strftime("%Y-%m-%d"):
             report = generate_monthly_report()
-            send_line_message(report)
+            
+            client.loop.create_task(send_monthly_report(report))
             
             data["last_report_date"] = now.strftime("%Y-%m-%d")
             save_usage_data(data)
@@ -200,7 +230,9 @@ async def on_voice_state_update(user, before, after):
 async def on_message(message):
     if message.content.lower() == "!report" and message.author.guild_permissions.administrator:
         report = generate_monthly_report()
-        send_line_message(report)
-        await message.channel.send("Monthly report sent to LINE group.")
+        
+        await send_monthly_report(report)
+        
+        await message.channel.send("Monthly report sent to LINE group and Discord channel.")
 
 client.run(DISCORD_TOKEN)
