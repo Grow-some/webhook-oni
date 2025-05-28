@@ -1,13 +1,16 @@
 #!/bin/bash
-echo "Webhook server starting..."
-
 SCRIPT_PATH="/app/webhook_server.py"
 
-python3 "$SCRIPT_PATH" &
+echo "Webhook server starting..."
 
-inotifywait -m -e modify "$SCRIPT_PATH" |
-while read path action file; do
-    echo "File ${file} changed, restarting server..."
-    pkill -f "$SCRIPT_PATH"
-    python3 "$SCRIPT_PATH" &
+while true; do
+  # サーバー起動
+  python3 "$SCRIPT_PATH" &
+  CHILD_PID=$!
+
+  # プロセスが死ぬまで待機
+  wait $CHILD_PID
+  echo "Process $CHILD_PID exited with code $?. Restarting in 1s..."
+
+  sleep 1
 done
