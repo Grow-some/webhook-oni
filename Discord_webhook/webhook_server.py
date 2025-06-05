@@ -26,6 +26,39 @@ client = discord.Client(intents=intents)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# client.run(DISCORD_TOKEN)の代わりに以下のコードを追加
+
+async def main_loop():
+    retry_count = 0
+    max_retries = 10
+    retry_delay = 5
+    
+    while True:
+        try:
+            logger.info(f"Discordに接続を試みています... (試行回数: {retry_count + 1})")
+            await client.start(DISCORD_TOKEN)
+        except discord.errors.LoginFailure:
+            logger.error("認証に失敗しました。トークンを確認してください。")
+            # 認証エラーは修正が必要なので終了
+            break
+        except Exception as e:
+            retry_count += 1
+            if retry_count >= max_retries:
+                logger.error(f"最大再試行回数({max_retries})に達しました。終了します。")
+                logger.error(f"最後のエラー: {e}")
+                break
+                
+            wait_time = retry_delay * retry_count
+            logger.warning(f"接続エラー: {e}")
+            logger.info(f"{wait_time}秒後に再接続を試みます...")
+            await asyncio.sleep(wait_time)
+        finally:
+            if client.is_closed():
+                logger.info("クライアント接続がクローズされました。再接続を準備中...")
+                await asyncio.sleep(5)  # 短い待機時間を設定
+
+
 def load_usage_data():
     """Load voice chat usage data from file"""
     try:
@@ -239,4 +272,14 @@ async def on_message(message):
         else:
             await message.channel.send("Failed to send monthly report. Please check MONTHLY_REPORT_CHANNEL configuration.")
 
-client.run(DISCORD_TOKEN)
+# client.run(DISCORD_TOKEN)
+
+if __name__ == "__main__":
+    # asyncioの追加をお忘れなく
+    import asyncio
+    try:
+        asyncio.run(main_loop())
+    except KeyboardInterrupt:
+        logger.info("キーボード割り込みにより終了します")
+    except Exception as e:
+        logger.critical(f"予期せぬエラーが発生しました: {e}")
