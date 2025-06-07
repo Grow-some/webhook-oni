@@ -62,7 +62,6 @@ class discord_bot:
         
         # フォーマッターの作成
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        formatter.converter = lambda *args: time.localtime(time.time() + 9 * 3600)
         
         # INFOレベル以上のログ用ハンドラー
         info_handler = logging.FileHandler(f"{log_dir}/discord_info.log", encoding="utf-8")
