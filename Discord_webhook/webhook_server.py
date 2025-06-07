@@ -5,7 +5,7 @@ import os
 import logging
 import uuid
 import json
-import requests
+import time
 import datetime
 import aiohttp
 from tinydb import TinyDB, Query
@@ -62,6 +62,7 @@ class discord_bot:
         
         # フォーマッターの作成
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        formatter.converter = lambda *args: time.localtime(time.time() + 9 * 3600)
         
         # INFOレベル以上のログ用ハンドラー
         info_handler = logging.FileHandler(f"{log_dir}/discord_info.log", encoding="utf-8")
@@ -251,7 +252,12 @@ class discord_bot:
 
 def app_main():
     bot = discord_bot()
-    bot.client.run(bot.DISCORD_TOKEN)
+    try:
+        bot.logger.info("Starting Discord bot...")
+        bot.client.run(bot.DISCORD_TOKEN)
+    except Exception as e:
+        bot.logger.error(f"An error occurred while running the bot: {e}")
+        raise
  
 if __name__ == "__main__":
     app_main()
