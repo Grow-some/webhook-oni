@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: discord_webhook:latest
     volumes:
       - ./:/app
     container_name: DiscordWebhook
