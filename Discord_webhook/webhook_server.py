@@ -7,279 +7,136 @@ import json
 import requests
 import datetime
 import time
-import calendar
-import threading
 
-load_dotenv()
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID") or 0)
-MONTHLY_REPORT_CHANNEL = int(os.getenv("MONTHLY_REPORT_CHANNEL") or 0)
-
-LINE_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
-LINE_GROUP_ID = os.getenv("LINE_GROUP_ID")
-
-USAGE_DATA_FILE = "voice_chat_usage.json"
-
-intents = discord.Intents.default()
-client = discord.Client(intents=intents)
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-
-# client.run(DISCORD_TOKEN)の代わりに以下のコードを追加
-
-async def main_loop():
-    retry_count = 0
-    max_retries = 10
-    retry_delay = 5
+class discord_bot:
+    def __init__(self):
+        
+        self.USAGE_DATA_FILE = "voice_chat_usage.json"
+        self.client = None
+        self.logger = None
+        self.DISCORD_TOKEN = None
+        self.VOICE_CHANNEL_ID = 0
+        self.MONTHLY_REPORT_CHANNEL = 0
+        self.LINE_ACCESS_TOKEN = None
+        self.LINE_GROUP_ID = None
+        
+        self.env_init()
+        self.setup_client()    
     
-    while True:
-        try:
-            logger.info(f"Discordに接続を試みています... (試行回数: {retry_count + 1})")
-            await client.start(DISCORD_TOKEN)
-        except discord.errors.LoginFailure:
-            logger.error("認証に失敗しました。トークンを確認してください。")
-            # 認証エラーは修正が必要なので終了
-            break
-        except Exception as e:
-            retry_count += 1
-            if retry_count >= max_retries:
-                logger.error(f"最大再試行回数({max_retries})に達しました。終了します。")
-                logger.error(f"最後のエラー: {e}")
-                break
+    def env_init(self):
+        if load_dotenv():
+            self.DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+            self.VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID") or 0)
+            self.MONTHLY_REPORT_CHANNEL = int(os.getenv("MONTHLY_REPORT_CHANNEL") or 0)
+            self.LINE_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
+            self.LINE_GROUP_ID = os.getenv("LINE_GROUP_ID")
+        
+        # ログ設定
+        log_dir = "./logs"
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+    
+        self.setup_multi_level_logger()
+        
+    def setup_multi_level_logger(self):
+        logger = logging.getLogger()
+        logger.setLevel(logging.DEBUG)  # ロガー自体は最低レベルに設定
+        
+        # ログディレクトリの確認と作成
+        log_dir = "./logs"
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        
+        # フォーマッターの作成
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        
+        # INFOレベル以上のログ用ハンドラー
+        info_handler = logging.FileHandler(f"{log_dir}/discord_info.log", encoding="utf-8")
+        info_handler.setLevel(logging.INFO)
+        info_handler.setFormatter(formatter)
+
+        # ERRORレベル以上のログ用ハンドラー
+        error_handler = logging.FileHandler(f"{log_dir}/discord_error.log", encoding="utf-8")
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(formatter)
+        
+        # ハンドラーをロガーに追加
+        logger.addHandler(info_handler)
+        logger.addHandler(error_handler)
+        
+        self.logger = logger
+    
+    def setup_client(self):
+        intents = discord.Intents.default()
+        intents.messages = True
+        intents.guilds = True
+        intents.voice_states = True
+        intents.message_content = True
+        print(intents.value)
+        self.client = discord.Client(intents=intents)
+        # イベントハンドラの登録
+        @self.client.event
+        async def on_ready():
+            self.logger.info(f"Bot is ready. Logged in as {self.client.user}")
+
+        @self.client.event
+        async def on_message(message):
+            if message.author.bot:
+                return  # Botのメッセージは無視
+            if message.content.lower() == "!report":
+                await message.channel.send(message.content.lower())
+                self.logger.info(message.content.lower())
                 
-            wait_time = retry_delay * retry_count
-            logger.warning(f"接続エラー: {e}")
-            logger.info(f"{wait_time}秒後に再接続を試みます...")
-            await asyncio.sleep(wait_time)
-        finally:
-            if client.is_closed():
-                logger.info("クライアント接続がクローズされました。再接続を準備中...")
-                await asyncio.sleep(5)  # 短い待機時間を設定
 
+        @self.client.event
+        async def on_voice_state_update(member, before, after):
+            if before.channel != after.channel:
+                if after.channel and after.channel.id == self.VOICE_CHANNEL_ID:
+                    self.logger.info(f"{member.display_name} joined {after.channel.name}")
+                    self.send_line_message(f"{member.display_name} joined {after.channel.name}")
+                if before.channel and before.channel.id == self.VOICE_CHANNEL_ID:
+                    self.logger.info(f"{member.display_name} left {before.channel.name}")
+                    self.send_line_message(f"{member.display_name} left {before.channel.name}")
+                    
+    def send_line_message(self,message):
+        url = "https://api.line.me/v2/bot/message/push"
 
-def load_usage_data():
-    """Load voice chat usage data from file"""
-    try:
-        if os.path.exists(USAGE_DATA_FILE):
-            with open(USAGE_DATA_FILE, 'r') as f:
-                return json.load(f)
-        else:
-            return {
-                "users": {},
-                "current_month": datetime.datetime.now().strftime("%Y-%m"),
-                "last_report_date": None
-            }
-    except Exception as e:
-        logger.error(f"Error loading usage data: {e}")
-        return {
-            "users": {},
-            "current_month": datetime.datetime.now().strftime("%Y-%m"),
-            "last_report_date": None
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.LINE_ACCESS_TOKEN}",
+            "X-Line-Retry-Key": str(uuid.uuid4()),  # 一意のリトライキーを設定
         }
 
-def save_usage_data(data):
-    """Save voice chat usage data to file"""
-    try:
-        with open(USAGE_DATA_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        logger.error(f"Error saving usage data: {e}")
-
-def send_line_message(message):
-    url = "https://api.line.me/v2/bot/message/push"
-
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {LINE_ACCESS_TOKEN}",
-        "X-Line-Retry-Key": str(uuid.uuid4()),  # 一意のリトライキーを設定
-    }
-
-    data = {
-        "to": LINE_GROUP_ID,
-        "messages": [
-            {
-                "type": "text",
-                "text": message
-            }
-        ]
-    }
-
-    response = requests.post(url, headers=headers, data=json.dumps(data))
-
-    if response.status_code == 200:
-        logger.info("✅ LINEメッセージ送信成功")
-    else:
-        logger.info(f"❌ LINEメッセージ送信失敗: {response.status_code}, {response.text}")
-        logger.info(f"{json.dumps(data)}")
-
-def format_duration(seconds):
-    """Format seconds into hours and minutes"""
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    return f"{hours}時間{minutes}分"
-
-def generate_monthly_report():
-    """Generate a monthly usage report"""
-    data = load_usage_data()
-    current_month = datetime.datetime.now().strftime("%Y-%m")
-    
-    if data["current_month"] != current_month:
-        data["current_month"] = current_month
-        save_usage_data(data)
-    
-    report = f"📊 {current_month} ボイスチャット利用時間レポート\n\n"
-    
-    if not data["users"]:
-        report += "今月はまだボイスチャットの利用がありません。"
-    else:
-        sorted_users = sorted(
-            data["users"].items(), 
-            key=lambda x: x[1].get("total_time", 0), 
-            reverse=True
-        )
-        
-        for user_id, user_data in sorted_users:
-            total_time = user_data.get("total_time", 0)
-            if total_time > 0:
-                report += f"👤 {user_data.get('display_name', user_id)}: {format_duration(total_time)}\n"
-        
-        total_group_time = sum(user.get("total_time", 0) for user in data["users"].values())
-        report += f"\n👥 グループ合計: {format_duration(total_group_time)}"
-    
-    return report
-
-async def send_discord_message(channel_id, message):
-    """Send a message to a Discord channel"""
-    try:
-        channel = client.get_channel(channel_id)
-        if channel:
-            await channel.send(message)
-            logger.info(f"✅ Discordメッセージ送信成功: Channel {channel_id}")
-            return True
-        else:
-            logger.error(f"❌ Discordチャンネルが見つかりません: {channel_id}")
-            return False
-    except Exception as e:
-        logger.error(f"❌ Discordメッセージ送信失敗: {e}")
-        return False
-
-async def send_monthly_report(report):
-    """Send monthly report to Discord channel only"""
-    if MONTHLY_REPORT_CHANNEL:
-        success = await send_discord_message(MONTHLY_REPORT_CHANNEL, report)
-        if success:
-            logger.info("Monthly report sent to Discord channel")
-            return True
-        else:
-            logger.error("Failed to send monthly report to Discord channel")
-            return False
-    else:
-        logger.warning("MONTHLY_REPORT_CHANNEL not configured, skipping Discord report")
-        return False
-
-def check_and_send_monthly_report():
-    """Check if it's time to send a monthly report and send if needed"""
-    now = datetime.datetime.now()
-    data = load_usage_data()
-    
-    if now.day == 1:
-        last_report = data.get("last_report_date")
-        
-        if last_report is None or last_report != now.strftime("%Y-%m-%d"):
-            report = generate_monthly_report()
-            
-            client.loop.create_task(send_monthly_report(report))
-            
-            data["last_report_date"] = now.strftime("%Y-%m-%d")
-            save_usage_data(data)
-            logger.info(f"Monthly report sent on {now.strftime('%Y-%m-%d')}")
-    
-def schedule_monthly_report_check():
-    """Schedule a daily check for monthly report"""
-    now = datetime.datetime.now()
-    
-    tomorrow = now.replace(day=now.day, hour=0, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
-    seconds_until_midnight = (tomorrow - now).total_seconds()
-    
-    threading.Timer(seconds_until_midnight, run_monthly_report_check).start()
-    logger.info(f"Scheduled next monthly report check in {seconds_until_midnight:.1f} seconds")
-
-def run_monthly_report_check():
-    """Run the monthly report check and schedule the next one"""
-    check_and_send_monthly_report()
-    schedule_monthly_report_check()
-
-def update_user_session(user_id, display_name, start_time=None, end_time=None):
-    """Update user session data"""
-    data = load_usage_data()
-    
-    if user_id not in data["users"]:
-        data["users"][user_id] = {
-            "display_name": display_name,
-            "total_time": 0,
-            "last_join": None
+        data = {
+            "to": self.LINE_GROUP_ID,
+            "messages": [
+                {
+                    "type": "text",
+                    "text": message
+                }
+            ]
         }
-    
-    data["users"][user_id]["display_name"] = display_name
-    
-    if start_time is not None:
-        data["users"][user_id]["last_join"] = start_time
-    
-    if end_time is not None and data["users"][user_id]["last_join"] is not None:
-        last_join = data["users"][user_id]["last_join"]
-        session_duration = end_time - last_join
-        data["users"][user_id]["total_time"] += session_duration
-        data["users"][user_id]["last_join"] = None
-        logger.info(f"User {display_name} session duration: {format_duration(session_duration)}")
-    
-    save_usage_data(data)
 
-@client.event
-async def on_ready():
-    logger.info("Bot is ready.")
-    schedule_monthly_report_check()
+        response = requests.post(url, headers=headers, data=json.dumps(data))
 
-@client.event
-async def on_voice_state_update(user, before, after):
-    if before.channel != after.channel:
-        current_time = int(time.time())
-        
-        if after.channel is not None and after.channel.id == VOICE_CHANNEL_ID:
-            message = f"{after.channel.name}に{user.display_name}が参加しました"
-            logger.info(message)
-            send_line_message(message)
-            
-            update_user_session(str(user.id), user.display_name, start_time=current_time)
-        
-        if before.channel is not None and before.channel.id == VOICE_CHANNEL_ID:
-            message = f"{before.channel.name}から{user.display_name}が退出しました"
-            logger.info(message)
-            send_line_message(message)
-            
-            update_user_session(str(user.id), user.display_name, end_time=current_time)
-
-@client.event
-async def on_message(message):
-    if message.content.lower() == "!report" and message.author.guild_permissions.administrator:
-        report = generate_monthly_report()
-        
-        success = await send_monthly_report(report)
-        
-        if success:
-            await message.channel.send("Monthly report sent to Discord channel.")
+        if response.status_code == 200:
+            self.logger.info("LINEメッセージ送信成功")
         else:
-            await message.channel.send("Failed to send monthly report. Please check MONTHLY_REPORT_CHANNEL configuration.")
+            self.logger.error(f"LINEメッセージ送信失敗: {response.status_code}, {response.text}")
+            self.logger.error(f"{json.dumps(data)}")
+            
+    def send_discord_message(self,message):
+        channel = self.client.get_channel(self.MONTHLY_REPORT_CHANNEL)
+        channel.send(message)
+        self.logger.info(f"Discord message sent to channel {self.MONTHLY_REPORT_CHANNEL}")
 
-# client.run(DISCORD_TOKEN)
+# class intime_calculator:
+#     def __init__(self):
+        
 
+def app_main():
+    bot = discord_bot()
+    bot.client.run(bot.DISCORD_TOKEN)
+ 
 if __name__ == "__main__":
-    # asyncioの追加をお忘れなく
-    import asyncio
-    try:
-        asyncio.run(main_loop())
-    except KeyboardInterrupt:
-        logger.info("キーボード割り込みにより終了します")
-    except Exception as e:
-        logger.critical(f"予期せぬエラーが発生しました: {e}")
+    app_main()
