@@ -1,12 +1,13 @@
 from dotenv import load_dotenv
 import discord
+from discord.ext import commands
 import os
 import logging
 import uuid
 import json
 import requests
 import datetime
-import time
+import aiohttp
 from tinydb import TinyDB, Query
 
 class discord_bot:
@@ -87,13 +88,13 @@ class discord_bot:
         intents.guilds = True
         intents.voice_states = True
         intents.message_content = True
-        print(intents.value)
-        self.client = discord.Client(intents=intents)
+        
+        self.client = commands.Bot(command_prefix="!", intents=intents)
         # イベントハンドラの登録
         @self.client.event
         async def on_ready():
             self.logger.info(f"Bot is ready. Logged in as {self.client.user}")
-            self.send_discord_message("Bot is ready.", channel_id=self.CONSOLE_CHANNEL_ID)
+            await self.send_discord_message("Bot is ready.", channel_id=self.CONSOLE_CHANNEL_ID)
 
         @self.client.event
         async def on_message(message):
@@ -104,6 +105,9 @@ class discord_bot:
             words = message.content.split()
             if words[0].lower() == "!report":
                 if len(words) > 1:
+                    if len(month) != 6 or not month.isdigit():
+                        await message.channel.send("月の形式が正しくありません。例: 202505")
+                        return
                     month = words[1]
                     usage = self.get_monthly_usage(message.author.id, month)
                     if usage:
@@ -113,14 +117,15 @@ class discord_bot:
                         await message.channel.send(f"{message.author.display_name}の{month}の使用時間は記録されていません。")
                 else:
                     usage = self.get_monthly_usage(message.author.id)
+                    if not usage:
+                        await message.channel.send(f"{message.author.display_name}の使用時間は記録されていません。")
+                        return
                     usage_table = "| 月 | 使用時間(時間) |\n|---|---|\n"
                     for month, seconds in usage.items():
                         usage_table += f"| {month} | {seconds/3600} |\n"
                     usage = f"\n{usage_table}"
                     await message.channel.send(f"{message.author.display_name}の使用時間:\n{usage}")
                     
-                
-
         @self.client.event
         async def on_voice_state_update(member, before, after):
             if not self.search_user_data(member.id):
@@ -128,15 +133,17 @@ class discord_bot:
             if before.channel != after.channel:
                 if after.channel and after.channel.id == self.VOICE_CHANNEL_ID:
                     self.logger.info(f"{member.display_name} joined {after.channel.name}")
-                    self.send_line_message(f"{member.display_name} joined {after.channel.name}")
-                    self.update_active_status(member.id, True)
+                    await self.send_line_message(f"{member.display_name} joined {after.channel.name}")
+                    if not self.update_active_status(member.id, True):
+                        self.logger.error(f"Failed to update active status for {member.id}")
                     
                 if before.channel and before.channel.id == self.VOICE_CHANNEL_ID:
                     self.logger.info(f"{member.display_name} left {before.channel.name}")
-                    self.send_line_message(f"{member.display_name} left {before.channel.name}")
-                    self.update_active_status(member.id, False)
+                    await self.send_line_message(f"{member.display_name} left {before.channel.name}")
+                    if not self.update_active_status(member.id, False):
+                        self.logger.error(f"Failed to update active status for {member.id}")
                     
-    def send_line_message(self,message):
+    async def send_line_message(self,message):
         url = "https://api.line.me/v2/bot/message/push"
 
         headers = {
@@ -154,23 +161,29 @@ class discord_bot:
                 }
             ]
         }
-
-        response = requests.post(url, headers=headers, data=json.dumps(data))
-
-        if response.status_code == 200:
-            self.logger.info("LINEメッセージ送信成功")
-        else:
-            self.logger.error(f"LINEメッセージ送信失敗: {response.status_code}, {response.text}")
-            self.logger.error(f"{json.dumps(data)}")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, data=json.dumps(data)) as response:
+                if response.status == 200:
+                    self.logger.info("LINEメッセージ送信成功")
+                else:
+                    error_text = await response.text()
+                    self.logger.error(f"LINEメッセージ送信失敗: {response.status}, {error_text}")
+                    self.logger.error(f"{json.dumps(data)}")
             
-    def send_discord_message(self,message, channel_id=None):
-        if channel_id is None:
-            channel_id = self.CONSOLE_CHANNEL_ID
-        channel = self.client.get_channel(channel_id)
-        channel.send(message)
-        self.logger.info(f"Discord message sent to channel {self.channel_id}")
-    
-    def create_user_inital_data(self, user_id):
+    async def send_discord_message(self, message, channel_id=None):
+        try:
+            if channel_id is None:
+                channel_id = self.CONSOLE_CHANNEL_ID
+            channel = self.client.get_channel(channel_id)
+            if channel:
+                await channel.send(message)
+                self.logger.info(f"Discord message sent to channel {channel_id}")
+            else:
+                self.logger.error(f"Channel {channel_id} not found.")
+        except Exception as e:
+            self.logger.error(f"Failed to send Discord message: {e}")
+            
+    def create_user_inital_data(self, user_id) -> None:
         initical_data = {
             "user_id": user_id,
             "intime": None,
@@ -179,38 +192,34 @@ class discord_bot:
         }
         self.db.insert(initical_data)
     
-    def search_user_data(self, user_id):
-        result = self.db.search(self.UsageData.user_id == user_id)
-        if result:
-            return True
-        return False
+    def search_user_data(self, user_id) -> bool:
+        return bool(self.db.search(self.UsageData.user_id == user_id))
         
-    def update_active_status(self, user_id, status:bool) -> str:
-        current_time = datetime.datetime.now().isoformat()
-        result = self.db.search(self.UsageData.user_id == user_id)
-        if result:
-            user_data = result[0]
-            if status:
-                user_data['intime'] = current_time
-                user_data['active_status'] = True
-            else:
-                if user_data['intime']:
-                    intime = datetime.datetime.fromisoformat(user_data['intime'])
+    def update_active_status(self, user_id, status:bool) -> bool:
+        try:
+            current_time = datetime.datetime.now().isoformat()
+            result = self.db.search(self.UsageData.user_id == user_id)
+            if result:
+                updates = {"active_status": status}
+                if status:
+                    updates["intime"] = current_time
+                else:
+                    intime = datetime.datetime.fromisoformat(result[0]['intime'])
                     duration = datetime.datetime.now() - intime
                     duration_seconds = int(duration.total_seconds())
                     month = datetime.datetime.now().strftime("%Y-%m")
-                    if month not in user_data['monthly_data']:
-                        user_data['monthly_data'][month] = 0
-                    user_data['monthly_data'][month] += duration_seconds
-                user_data['intime'] = None
-                user_data['active_status'] = False
-            
-            self.db.update(user_data, self.UsageData.user_id == user_id)
-            return True
-        else:
+                    updates["monthly_data." + month] = result[0]['monthly_data'].get(month, 0) + duration_seconds
+                    updates["intime"] = None
+                self.db.update(updates, self.UsageData.user_id == user_id)
+                return True
+            else:
+                self.logger.warning(f"No user data found for user_id: {user_id}")
+                return False
+        except Exception as e:
+            self.logger.error(f"Error updating active status for user_id {user_id}: {e}")
             return False
         
-    def get_monthly_usage(self, user_id, month=None):
+    def get_monthly_usage(self, user_id, month=None) -> dict:
         result = self.db.search(self.UsageData.user_id == user_id)
         if result:
             user_data = result[0]
