@@ -23,18 +23,11 @@ class discord_bot:
         self.LINE_GROUP_ID = None
         
         self.env_init()
+        self.db_init()
         self.setup_client()
-        self.db_init()    
+    
     
     def env_init(self):
-        if load_dotenv():
-            self.DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-            self.VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID") or 0)
-            self.MONTHLY_REPORT_CHANNEL = int(os.getenv("MONTHLY_REPORT_CHANNEL") or 0)
-            self.LINE_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
-            self.LINE_GROUP_ID = os.getenv("LINE_GROUP_ID")
-            self.CONSOLE_CHANNEL_ID = int(os.getenv("CONSOLE_CHANNEL_ID") or 0)
-        
         # ログ設定
         log_dir = "./logs"
         if not os.path.exists(log_dir):
@@ -45,14 +38,18 @@ class discord_bot:
             os.makedirs(db_dir)
         if not os.path.exists(f"{db_dir}/{self.USAGE_DATA_FILE}"):
             with open(f"{db_dir}/{self.USAGE_DATA_FILE}", 'w') as f:
-                json.dump([], f)
+                json.dump({}, f)
         self.setup_multi_level_logger()
-    
-    def db_init(self):
-        # TinyDBの初期化
-        self.db = TinyDB(f"./db/{self.USAGE_DATA_FILE}")
-        self.UsageData = Query()
-        self.logger.info("Database initialized successfully.")
+        if load_dotenv():
+            self.DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+            self.VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID") or 0)
+            self.MONTHLY_REPORT_CHANNEL = int(os.getenv("MONTHLY_REPORT_CHANNEL") or 0)
+            self.LINE_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
+            self.LINE_GROUP_ID = os.getenv("LINE_GROUP_ID")
+            self.CONSOLE_CHANNEL_ID = int(os.getenv("CONSOLE_CHANNEL_ID") or 0)
+        else:
+            self.logger.error("Failed to load environment variables from .env file.")
+            raise EnvironmentError("Environment variables not loaded. Please check your .env file.")
         
     def setup_multi_level_logger(self):
         logger = logging.getLogger()
@@ -81,12 +78,21 @@ class discord_bot:
         logger.addHandler(error_handler)
         
         self.logger = logger
-    
+            
+    def db_init(self):
+        # TinyDBの初期化
+        self.db = TinyDB(f"./db/{self.USAGE_DATA_FILE}")
+        self.UsageData = Query()
+        if not self.db.contains(self.UsageData.users.exists()):
+            self.db.insert({"users": {}})
+        self.logger.info("Database initialized successfully.")
+        
     def setup_client(self):
         intents = discord.Intents.default()
         intents.messages = True
         intents.guilds = True
         intents.voice_states = True
+        # administrative intents
         intents.message_content = True
         
         self.client = commands.Bot(command_prefix="!", intents=intents)
@@ -98,50 +104,53 @@ class discord_bot:
 
         @self.client.event
         async def on_message(message):
-            if not self.search_user_data(message.author.id):
-                self.create_user_inital_data(message.author.id)
             if message.author.bot:
                 return  # Botのメッセージは無視
+            iddentifier = str(message.author.id)
+            if not self.search_user_data(iddentifier):
+                self.create_user_inital_data(iddentifier)
             words = message.content.split()
             if words[0].lower() == "!report":
+                usage_table = f"{message.author.display_name}の使用時間:\n"
                 if len(words) > 1:
-                    if len(month) != 6 or not month.isdigit():
-                        await message.channel.send("月の形式が正しくありません。例: 202505")
+                    month = words[1]
+                    if len(month) != 7 or month[4] != '-' or not (month[:4].isdigit() and month[5:].isdigit()):
+                        await message.channel.send("月の形式が正しくありません。例: 2025-05")
                         return
                     month = words[1]
-                    usage = self.get_monthly_usage(message.author.id, month)
+                    usage = self.get_monthly_usage(iddentifier, month)
                     if usage:
-                        usage_table = f"| 月 | 使用時間(時間) |\n|---|---|\n| {month} | {usage/3600} |\n"
-                        await message.channel.send(f"{message.author.display_name}の{month}の使用時間:\n{usage_table}")
+                        
+                        usage_table += f"{month}  :  {round(usage / 3600, 2)}hours\n"
+                        await message.channel.send(f"{usage_table}")
                     else:
                         await message.channel.send(f"{message.author.display_name}の{month}の使用時間は記録されていません。")
                 else:
-                    usage = self.get_monthly_usage(message.author.id)
+                    usage = self.get_monthly_usage(iddentifier)
                     if not usage:
                         await message.channel.send(f"{message.author.display_name}の使用時間は記録されていません。")
                         return
-                    usage_table = "| 月 | 使用時間(時間) |\n|---|---|\n"
                     for month, seconds in usage.items():
-                        usage_table += f"| {month} | {seconds/3600} |\n"
-                    usage = f"\n{usage_table}"
-                    await message.channel.send(f"{message.author.display_name}の使用時間:\n{usage}")
+                        usage_table += f"{month}  :  {round(seconds / 3600, 2)}hours\n"
+                    await message.channel.send(f"{usage_table}")
                     
         @self.client.event
         async def on_voice_state_update(member, before, after):
-            if not self.search_user_data(member.id):
-                self.create_user_inital_data(member.id)
+            iddentifier = str(member.id)
+            if not self.search_user_data(iddentifier):
+                self.create_user_inital_data(iddentifier)
             if before.channel != after.channel:
                 if after.channel and after.channel.id == self.VOICE_CHANNEL_ID:
                     self.logger.info(f"{member.display_name} joined {after.channel.name}")
                     await self.send_line_message(f"{member.display_name} joined {after.channel.name}")
-                    if not self.update_active_status(member.id, True):
-                        self.logger.error(f"Failed to update active status for {member.id}")
+                    if not self.update_active_status(iddentifier, True):
+                        self.logger.error(f"Failed to update active status for {iddentifier}")
                     
                 if before.channel and before.channel.id == self.VOICE_CHANNEL_ID:
                     self.logger.info(f"{member.display_name} left {before.channel.name}")
                     await self.send_line_message(f"{member.display_name} left {before.channel.name}")
-                    if not self.update_active_status(member.id, False):
-                        self.logger.error(f"Failed to update active status for {member.id}")
+                    if not self.update_active_status(iddentifier, False):
+                        self.logger.error(f"Failed to update active status for {iddentifier}")
                     
     async def send_line_message(self,message):
         url = "https://api.line.me/v2/bot/message/push"
@@ -184,33 +193,43 @@ class discord_bot:
             self.logger.error(f"Failed to send Discord message: {e}")
             
     def create_user_inital_data(self, user_id) -> None:
-        initical_data = {
-            "user_id": user_id,
-            "intime": None,
-            "active_status": False,
-            "monthly_data": {}
-        }
-        self.db.insert(initical_data)
+        current_data = self.db.get(self.UsageData.users.exists())
+        users = current_data["users"]
+        if user_id not in users:
+            users[user_id] = {
+                "intime": None,
+                "active_status": False,
+                "monthly_data": {}
+            }
+            self.db.update({"users": users}, self.UsageData.users.exists())
     
     def search_user_data(self, user_id) -> bool:
-        return bool(self.db.search(self.UsageData.user_id == user_id))
+        current_data = self.db.get(self.UsageData.users.exists())
+        return user_id in current_data["users"]
         
     def update_active_status(self, user_id, status:bool) -> bool:
         try:
-            current_time = datetime.datetime.now().isoformat()
-            result = self.db.search(self.UsageData.user_id == user_id)
-            if result:
-                updates = {"active_status": status}
+            current_data = self.db.get(self.UsageData.users.exists())
+            users = current_data["users"]
+            if str(user_id) in users:
+                user_data = users[user_id]
+                current_time = datetime.datetime.now().isoformat()
+                                
+                    
                 if status:
-                    updates["intime"] = current_time
+                    user_data["intime"] = current_time
+                    user_data["active_status"] = True
                 else:
-                    intime = datetime.datetime.fromisoformat(result[0]['intime'])
-                    duration = datetime.datetime.now() - intime
-                    duration_seconds = int(duration.total_seconds())
-                    month = datetime.datetime.now().strftime("%Y-%m")
-                    updates["monthly_data." + month] = result[0]['monthly_data'].get(month, 0) + duration_seconds
-                    updates["intime"] = None
-                self.db.update(updates, self.UsageData.user_id == user_id)
+                    if user_data["intime"]:
+                        intime = datetime.datetime.fromisoformat(user_data["intime"])
+                        duration = datetime.datetime.now() - intime
+                        duration_seconds = int(duration.total_seconds())
+                        month = datetime.datetime.now().strftime("%Y-%m")
+                        user_data["monthly_data"][month] = user_data["monthly_data"].get(month, 0) + duration_seconds
+                    user_data["intime"] = None
+                    user_data["active_status"] = False
+                users[user_id] = user_data
+                self.db.update({"users": users}, self.UsageData.users.exists())
                 return True
             else:
                 self.logger.warning(f"No user data found for user_id: {user_id}")
@@ -220,20 +239,15 @@ class discord_bot:
             return False
         
     def get_monthly_usage(self, user_id, month=None) -> dict:
-        result = self.db.search(self.UsageData.user_id == user_id)
-        if result:
-            user_data = result[0]
+        current_data = self.db.get(self.UsageData.users.exists())
+        users = current_data["users"]
+        if str(user_id) in users:
+            user_data = users[user_id]
             if month:
-                return user_data['monthly_data'].get(month, 0)
+                return user_data["monthly_data"].get(month, 0)
             else:
-                return user_data['monthly_data']
+                return user_data["monthly_data"]
         return {}
-    
-    
-
-# class intime_calculator:
-#     def __init__(self):
-        
 
 def app_main():
     bot = discord_bot()
