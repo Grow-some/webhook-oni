@@ -151,6 +151,15 @@ class discord_bot:
                     await self.send_line_message(f"{member.display_name} left {before.channel.name}")
                     if not self.update_active_status(iddentifier, False):
                         self.logger.error(f"Failed to update active status for {iddentifier}")
+        
+        @self.client.event
+        async def on_error(event, *args, **kwargs):
+            error = discord.utils.get(self.client.errors, event=event)
+            if error:
+                self.logger.error(f"An error occurred in event {event}: {error}")
+                await self.send_discord_message(f"An error occurred in event {event}: {error}", channel_id=self.CONSOLE_CHANNEL_ID)
+            else:
+                self.logger.error(f"An unknown error occurred in event {event}")
                     
     async def send_line_message(self,message):
         url = "https://api.line.me/v2/bot/message/push"
@@ -251,12 +260,13 @@ class discord_bot:
 
 def app_main():
     bot = discord_bot()
-    try:
-        bot.logger.info("Starting Discord bot...")
-        bot.client.run(bot.DISCORD_TOKEN)
-    except Exception as e:
-        bot.logger.error(f"An error occurred while running the bot: {e}")
-        raise
+    while True:
+        try:
+            bot.logger.info("Starting Discord bot...")
+            bot.client.run(bot.DISCORD_TOKEN)
+        except Exception as e:
+            bot.logger.error(f"An error occurred while running the bot: {e}")
+            raise
  
 if __name__ == "__main__":
     app_main()
