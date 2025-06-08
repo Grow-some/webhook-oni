@@ -154,12 +154,11 @@ class discord_bot:
         
         @self.client.event
         async def on_error(event, *args, **kwargs):
-            error = discord.utils.get(self.client.errors, event=event)
-            if error:
-                self.logger.error(f"An error occurred in event {event}: {error}")
-                await self.send_discord_message(f"An error occurred in event {event}: {error}", channel_id=self.CONSOLE_CHANNEL_ID)
-            else:
-                self.logger.error(f"An unknown error occurred in event {event}")
+            self.logger.error(f"An error occurred in event '{event}'", exc_info=True)
+            try:
+                await self.send_discord_message(f"An error occurred in event '{event}'", channel_id=self.CONSOLE_CHANNEL_ID)
+            except Exception as notify_error:
+                self.logger.error(f"Failed to notify error: {notify_error}")
                     
     async def send_line_message(self,message):
         url = "https://api.line.me/v2/bot/message/push"
@@ -259,14 +258,17 @@ class discord_bot:
         return {}
 
 def app_main():
-    bot = discord_bot()
     while True:
         try:
+            bot = discord_bot()
             bot.logger.info("Starting Discord bot...")
             bot.client.run(bot.DISCORD_TOKEN)
         except Exception as e:
             bot.logger.error(f"An error occurred while running the bot: {e}")
             raise
+        finally:
+            bot.logger.info("Bot has stopped. Restarting in 5 seconds...")
+            time.sleep(5)
  
 if __name__ == "__main__":
     app_main()
