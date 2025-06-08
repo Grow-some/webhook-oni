@@ -8,6 +8,6 @@ COPY healthcheck.py .
 RUN pip install --no-cache-dir -r requirements.txt
 ENV TZ=Asia/Tokyo
 RUN ln -snf /usr/share/zoneinfo/Asia/Tokyo /etc/localtime && echo $TZ > /etc/timezone
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python3 healthcheck.py
-CMD ["python3", "webhook_server.py"]
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
