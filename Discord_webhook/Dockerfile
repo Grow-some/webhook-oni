@@ -7,4 +7,4 @@ COPY ./ /app
 RUN pip install --no-cache-dir -r requirements.txt
 ENV TZ=Asia/Tokyo
 RUN ln -snf /usr/share/zoneinfo/Asia/Tokyo /etc/localtime && echo $TZ > /etc/timezone
-ENTRYPOINT ["python3", "webhook_discord.py"]
+ENTRYPOINT ["python3", "webhook_server.py"]
