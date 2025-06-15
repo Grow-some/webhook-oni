@@ -258,17 +258,14 @@ class discord_bot:
         return {}
 
 def app_main():
-    while True:
-        try:
-            bot = discord_bot()
-            bot.logger.info("Starting Discord bot...")
-            bot.client.run(bot.DISCORD_TOKEN)
-        except Exception as e:
-            bot.logger.error(f"An error occurred while running the bot: {e}")
-            raise
-        finally:
-            bot.logger.info("Bot has stopped. Restarting in 5 seconds...")
-            time.sleep(5)
+    try:
+        bot = discord_bot()
+        bot.logger.info("Starting Discord bot...")
+        bot.client.run(bot.DISCORD_TOKEN)
+    except Exception as e:
+        bot.logger.error(f"An error occurred while running the bot: {e}")
+    finally:
+        bot.logger.info("Bot has stopped. Restarting in 5 seconds...")
  
 if __name__ == "__main__":
     app_main()
