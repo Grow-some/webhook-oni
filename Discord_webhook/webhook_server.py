@@ -184,6 +184,7 @@ class discord_bot:
                     self.logger.info("LINEメッセージ送信成功")
                 else:
                     error_text = await response.text()
+                    await self.send_discord_message(f"LINEメッセージ送信失敗: {response.status}, {error_text}",self.CONSOLE_CHANNEL_ID)
                     self.logger.error(f"LINEメッセージ送信失敗: {response.status}, {error_text}")
                     self.logger.error(f"{json.dumps(data)}")
             
