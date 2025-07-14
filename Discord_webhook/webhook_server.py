@@ -11,7 +11,7 @@ import aiohttp
 from tinydb import TinyDB, Query
 
 class discord_bot:
-    def __init__(self):
+    def __init__(self,line_mode=False):
         
         self.USAGE_DATA_FILE = "voice_chat_usage.json"
         self.client = None
@@ -21,7 +21,7 @@ class discord_bot:
         self.MONTHLY_REPORT_CHANNEL = 0
         self.LINE_ACCESS_TOKEN = None
         self.LINE_GROUP_ID = None
-        
+        self.LINE_MODE = line_mode
         self.env_init()
         self.db_init()
         self.setup_client()
@@ -44,8 +44,9 @@ class discord_bot:
             self.DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
             self.VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID") or 0)
             self.MONTHLY_REPORT_CHANNEL = int(os.getenv("MONTHLY_REPORT_CHANNEL") or 0)
-            self.LINE_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
-            self.LINE_GROUP_ID = os.getenv("LINE_GROUP_ID")
+            if self.LINE_MODE:
+                self.LINE_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
+                self.LINE_GROUP_ID = os.getenv("LINE_GROUP_ID")
             self.CONSOLE_CHANNEL_ID = int(os.getenv("CONSOLE_CHANNEL_ID") or 0)
         else:
             self.logger.error("Failed to load environment variables from .env file.")
@@ -109,6 +110,12 @@ class discord_bot:
             iddentifier = str(message.author.id)
             if not self.search_user_data(iddentifier):
                 self.create_user_inital_data(iddentifier)
+
+            # !aiから始まるメッセージを検知してログ出力
+            if message.content.lower().startswith("!ai"):
+                self.logger.info(f"AI command detected from {message.author.display_name}: {message.content}")
+                await self.send_discord_message(f"AI command detected: {message.content}", channel_id=self.CONSOLE_CHANNEL_ID)
+
             words = message.content.split()
             if words[0].lower() == "!report":
                 usage_table = f"{message.author.display_name}の使用時間:\n"
@@ -161,6 +168,9 @@ class discord_bot:
                 self.logger.error(f"Failed to notify error: {notify_error}")
                     
     async def send_line_message(self,message):
+        if not self.LINE_MODE:
+            self.logger.warning("LINE mode is not enabled. Skipping LINE message sending.")
+            return
         url = "https://api.line.me/v2/bot/message/push"
 
         headers = {
@@ -260,7 +270,9 @@ class discord_bot:
 
 def app_main():
     try:
-        bot = discord_bot()
+        load_dotenv()
+        line_mode = os.getenv("LINE_MODE", "False").lower() == "true"
+        bot = discord_bot(line_mode=line_mode)
         bot.logger.info("Starting Discord bot...")
         bot.client.run(bot.DISCORD_TOKEN)
     except Exception as e:
